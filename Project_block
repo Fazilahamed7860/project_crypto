@@ -1,0 +1,158 @@
+Aim:
+TO verify and ceate miniChain — A From-Scratch Blockchain & Cryptocurrency (Python, zero dependencies)
+A working blockchain + cryptocurrency simulation built entirely with Python's standard library, so it runs anywhere with no pip install needed.
+
+Core Functions:
+
+blockchain.py
+
+Block.compute_hash() — SHA-256 hash of a block's header fields
+Block.compute_merkle_root() — tamper-evident summary of all transactions in the block
+Blockchain.add_transaction(tx) — validates and queues a transaction into the mempool
+Blockchain.mine_pending_transactions(miner_address) — runs Proof-of-Work, pays the block reward, appends the new block
+Blockchain.adjust_difficulty() — retargets mining difficulty every 5 blocks based on actual vs. target block time
+Blockchain.get_balance(address) — replays the whole chain to compute a wallet's balance
+Blockchain.is_chain_valid() — walks the chain checking hashes, merkle roots, and links
+
+wallet.py
+
+Wallet() — generates a private key + derives a public address
+Wallet.sign(message) — signs data with the private key
+Transaction.sign_transaction(wallet) / Transaction.is_valid() — sign and validate spends
+
+stats.py
+
+chain_stats(bc) — total blocks/transactions, average block time, estimated hash rate, current reward, % of max supply mined, top balances, chain validity
+print_stats(bc) — pretty-prints the above like a block explorer dashboard
+
+programe:
+~~~
+"""
+main.py
+End-to-end demo of the mini-cryptocurrency system.
+
+Run: python3 main.py
+"""
+
+import json
+from blockchain import Blockchain
+from wallet import Wallet, Transaction
+from stats import print_stats, chain_stats
+
+
+def send(bc: Blockchain, sender_wallet: Wallet, recipient_address: str, amount: float, fee: float = 0.1):
+    tx = Transaction(sender_wallet.address, recipient_address, amount, fee)
+    tx.sign_transaction(sender_wallet)
+    ok = bc.add_transaction(tx)
+    print(f"Transaction {'ACCEPTED' if ok else 'REJECTED'}: "
+          f"{sender_wallet.address[:8]}... -> {recipient_address[:8]}...  amount={amount}")
+    return ok
+
+
+def main():
+    print("Initializing blockchain (difficulty=4)...")
+    bc = Blockchain(difficulty=4)
+
+    alice = Wallet()
+    bob = Wallet()
+    carol = Wallet()
+    miner = Wallet()
+
+    print(f"Alice address : {alice.address}")
+    print(f"Bob address   : {bob.address}")
+    print(f"Carol address : {carol.address}")
+    print(f"Miner address : {miner.address}\n")
+
+    # --- Round 1: miner mines an empty block first to earn coins to spend ---
+    print("Mining block #1 (no pending txs, just to reward the miner)...")
+    bc.mine_pending_transactions(miner.address)
+
+    # --- Round 2: miner sends coins to Alice and Bob ---
+    send(bc, miner, alice.address, 20)
+    send(bc, miner, bob.address, 10)
+    print("Mining block #2...")
+    bc.mine_pending_transactions(miner.address)
+
+    # --- Round 3: Alice pays Carol, Bob pays Alice ---
+    send(bc, alice, carol.address, 5)
+    send(bc, bob, alice.address, 3)
+    print("Mining block #3...")
+    bc.mine_pending_transactions(miner.address)
+
+    # --- Round 4: an invalid transaction (negative amount) gets rejected ---
+    bad_tx = Transaction(alice.address, carol.address, -100)
+    bad_tx.sign_transaction(alice)
+    bc.add_transaction(bad_tx)  # should be rejected silently by add_transaction's validity check
+    print("Mining block #4...")
+    bc.mine_pending_transactions(miner.address)
+
+    print("\nBalances:")
+    for name, w in [("Alice", alice), ("Bob", bob), ("Carol", carol), ("Miner", miner)]:
+        print(f"  {name:6}: {bc.get_balance(w.address):.4f} coins")
+
+    print_stats(bc)
+
+    # --- Export the clean, valid chain + stats as JSON, like a block explorer API would ---
+    export = {
+        "chain": [block.to_dict() for block in bc.chain],
+        "stats": chain_stats(bc),
+    }
+    with open("chain_export.json", "w") as f:
+        json.dump(export, f, indent=2, default=str)
+    print("Full valid chain + stats exported to chain_export.json")
+
+    # --- Tamper-detection demo (done AFTER export, so the exported file stays clean) ---
+    print("\nTampering with block #2's data to prove immutability detection works...")
+    bc.chain[2].transactions[0]["amount"] = 999999
+    print(f"Chain valid after tampering? {bc.is_chain_valid()}  <-- should be False")
+
+
+if __name__ == "__main__":
+    main()
+~~~~
+
+Output:
+
+Initializing blockchain (difficulty=4)...
+Alice address : 33166454743f93ff8d85f4151847e1de3d1a8307
+Bob address   : 71949ebb97c348dadc9acbe3b82d4b30fa262fbd
+Carol address : 7eb54e4c9f37b2663383be1291c77cfeaa7a9449
+Miner address : df48a04009b22fe678802dd32190060721736805
+
+Mining block #1 (no pending txs, just to reward the miner)...
+Transaction ACCEPTED: df48a040... -> 33166454...  amount=20
+Transaction ACCEPTED: df48a040... -> 71949ebb...  amount=10
+Mining block #2...
+Transaction ACCEPTED: 33166454... -> 7eb54e4c...  amount=5
+Transaction ACCEPTED: 71949ebb... -> 33166454...  amount=3
+Mining block #3...
+Mining block #4...
+
+Balances:
+  Alice : 18.0000 coins
+  Bob   : 7.0000 coins
+  Carol : 5.0000 coins
+  Miner : 170.0000 coins
+
+===== BLOCKCHAIN STATISTICS =====
+Total blocks            : 5
+Total transactions      : 8
+Avg block time (sec)    : 0.067
+Current difficulty      : 5
+Estimated hash rate     : 1.56e+07 H/s (simulated)
+Current block reward    : 50.0 coins
+Total coins minted      : 200.0 / 21000000
+% of max supply mined   : 0.00095238%
+Pending (mempool) txs   : 0
+Chain valid?            : True
+Top balances:
+  df48a04009b2...  ->  170.0000 coins
+  33166454743f...  ->  18.0000 coins
+  71949ebb97c3...  ->  7.0000 coins
+  7eb54e4c9f37...  ->  5.0000 coins
+==================================
+
+Full valid chain + stats exported to chain_export.json
+
+Tampering with block #2's data to prove immutability detection works...
+Chain valid after tampering? False  <-- should be False
